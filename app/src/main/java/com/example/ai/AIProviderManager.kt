@@ -21,6 +21,7 @@ class AIProviderManager(
 ) {
     val geminiProvider = GeminiProvider()
     val omniRouteProvider = OmniRouteProvider()
+    val geminiKeyValidator = GeminiKeyValidator(geminiProvider)
 
     fun getGeminiKey(): String = secureStorage.getDecrypted(SecureKeyStorage.KEY_GEMINI)
     fun setGeminiKey(key: String) = secureStorage.saveEncrypted(SecureKeyStorage.KEY_GEMINI, key)

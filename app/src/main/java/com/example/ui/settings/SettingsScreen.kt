@@ -1,6 +1,11 @@
 package com.example.ui.settings
 
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,9 +26,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.EvaApplication
+import com.example.ai.KeyValidationState
 import com.example.data.preferences.AIProviderMode
 import com.example.data.preferences.SubscriptionPlan
 import com.example.data.preferences.VoiceEngineMode
@@ -174,8 +182,11 @@ fun MainSettingsMenu(onSelectSubpage: (SettingsSubpage) -> Unit) {
 
 @Composable
 fun ApiKeysSettingsView() {
+    val context = LocalContext.current
     val app = EvaApplication.instance
     val coroutineScope = rememberCoroutineScope()
+    val clipboardManager = remember { context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager }
+
     var geminiKey by remember { mutableStateOf(app.aiProviderManager.getGeminiKey()) }
     var omniKey by remember { mutableStateOf(app.aiProviderManager.getOmniRouteKey()) }
     var omniUrl by remember { mutableStateOf(app.preferences.getOmniRouteBaseUrl()) }
@@ -183,13 +194,76 @@ fun ApiKeysSettingsView() {
     var omniModel by remember { mutableStateOf(app.preferences.getOmniRouteModel()) }
     var mode by remember { mutableStateOf(app.preferences.getProviderMode()) }
 
+    var showGeminiKey by remember { mutableStateOf(false) }
+    var showOmniKey by remember { mutableStateOf(false) }
+    var retryCount by remember { mutableIntStateOf(0) }
+    var isValidatingGemini by remember { mutableStateOf(false) }
+    var saveFeedbackMessage by remember { mutableStateOf<String?>(null) }
+
+    var geminiValidationState by remember {
+        mutableStateOf<KeyValidationState>(
+            if (geminiKey.isBlank()) {
+                KeyValidationState.Missing
+            } else {
+                KeyValidationState.Idle
+            }
+        )
+    }
+
+    // Function to run server-backed validation and retry
+    fun triggerGeminiValidation(isRetry: Boolean = false) {
+        val cleanKey = geminiKey.trim().trim('"', '\'')
+        geminiKey = cleanKey
+
+        if (cleanKey.isBlank()) {
+            geminiValidationState = KeyValidationState.Missing
+            return
+        }
+
+        if (isRetry) {
+            retryCount++
+        }
+
+        isValidatingGemini = true
+        coroutineScope.launch {
+            val result = app.aiProviderManager.geminiKeyValidator.validateKeyWithServer(
+                rawKey = cleanKey,
+                onProgress = { progressState ->
+                    geminiValidationState = progressState
+                }
+            )
+            geminiValidationState = result
+            isValidatingGemini = false
+
+            if (result is KeyValidationState.Success) {
+                app.aiProviderManager.setGeminiKey(cleanKey)
+            }
+        }
+    }
+
+    // Auto-check format or initial state if key is present but unvalidated
+    LaunchedEffect(Unit) {
+        if (geminiKey.isNotBlank() && geminiValidationState is KeyValidationState.Idle) {
+            val syntax = app.aiProviderManager.geminiKeyValidator.validateSyntax(geminiKey)
+            if (syntax is com.example.ai.SyntaxValidation.Malformed) {
+                geminiValidationState = KeyValidationState.Malformed(syntax.reason, syntax.tip)
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("AI Provider Mode", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        // AI Provider Mode
+        Text(
+            text = "AI Provider Mode",
+            color = TextSecondary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
         Spacer(modifier = Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AIProviderMode.values().forEach { m ->
@@ -204,69 +278,643 @@ fun ApiKeysSettingsView() {
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        OutlinedTextField(
-            value = geminiKey,
-            onValueChange = { geminiKey = it },
-            label = { Text("Gemini API Key") },
+        // --- GEMINI CONFIGURATION CARD ---
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(
+                width = 1.dp,
+                color = when (geminiValidationState) {
+                    is KeyValidationState.Success -> StatusSuccess.copy(alpha = 0.5f)
+                    is KeyValidationState.Failed, is KeyValidationState.Missing -> StatusError.copy(alpha = 0.4f)
+                    is KeyValidationState.Malformed -> StatusWarning.copy(alpha = 0.5f)
+                    is KeyValidationState.Validating -> NeonCyan.copy(alpha = 0.6f)
+                    KeyValidationState.Idle -> DarkOutline
+                }
+            ),
             modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = geminiModel,
-            onValueChange = {
-                geminiModel = it
-                app.preferences.setGeminiModel(it)
-            },
-            label = { Text("Gemini Model ID") },
-            modifier = Modifier.fillMaxWidth()
-        )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                // Header with status badge
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = "Gemini AI",
+                            tint = NeonCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Google Gemini API",
+                            color = TextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
 
-        Spacer(modifier = Modifier.height(16.dp))
+                    // Status Badge Chip
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = when (geminiValidationState) {
+                            is KeyValidationState.Success -> StatusSuccess.copy(alpha = 0.18f)
+                            is KeyValidationState.Failed, is KeyValidationState.Missing -> StatusError.copy(alpha = 0.18f)
+                            is KeyValidationState.Malformed -> StatusWarning.copy(alpha = 0.18f)
+                            is KeyValidationState.Validating -> NeonCyan.copy(alpha = 0.18f)
+                            KeyValidationState.Idle -> if (geminiKey.isNotBlank()) NeonCyan.copy(alpha = 0.12f) else DarkOutline.copy(alpha = 0.3f)
+                        }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            val (badgeText, badgeColor) = when (geminiValidationState) {
+                                is KeyValidationState.Success -> "Verified" to StatusSuccess
+                                is KeyValidationState.Failed -> "Auth Failed" to StatusError
+                                is KeyValidationState.Missing -> "Missing Key" to StatusError
+                                is KeyValidationState.Malformed -> "Invalid Format" to StatusWarning
+                                is KeyValidationState.Validating -> "Authenticating..." to NeonCyan
+                                KeyValidationState.Idle -> if (geminiKey.isNotBlank()) "Configured" to TextSecondary else "Not Configured" to TextMuted
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(badgeColor, RoundedCornerShape(3.dp))
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = badgeText,
+                                color = badgeColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
 
-        OutlinedTextField(
-            value = omniKey,
-            onValueChange = { omniKey = it },
-            label = { Text("OmniRoute API Key") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = omniUrl,
-            onValueChange = {
-                omniUrl = it
-                app.preferences.setOmniRouteBaseUrl(it)
-            },
-            label = { Text("OmniRoute Base URL") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = omniModel,
-            onValueChange = {
-                omniModel = it
-                app.preferences.setOmniRouteModel(it)
-            },
-            label = { Text("OmniRoute Model ID") },
-            modifier = Modifier.fillMaxWidth()
-        )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Gemini API Key Input
+                OutlinedTextField(
+                    value = geminiKey,
+                    onValueChange = {
+                        geminiKey = it
+                        if (it.isBlank()) {
+                            geminiValidationState = KeyValidationState.Missing
+                        } else {
+                            val syntax = app.aiProviderManager.geminiKeyValidator.validateSyntax(it)
+                            geminiValidationState = if (syntax is com.example.ai.SyntaxValidation.Malformed) {
+                                KeyValidationState.Malformed(syntax.reason, syntax.tip)
+                            } else {
+                                KeyValidationState.Idle
+                            }
+                        }
+                    },
+                    label = { Text("Gemini API Key") },
+                    placeholder = { Text("AIzaSy...") },
+                    singleLine = true,
+                    visualTransformation = if (showGeminiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    isError = geminiValidationState is KeyValidationState.Failed ||
+                            geminiValidationState is KeyValidationState.Malformed ||
+                            (geminiValidationState is KeyValidationState.Missing && geminiKey.isBlank()),
+                    trailingIcon = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { showGeminiKey = !showGeminiKey }) {
+                                Icon(
+                                    imageVector = if (showGeminiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (showGeminiKey) "Hide Key" else "Show Key",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            if (geminiKey.isNotBlank()) {
+                                IconButton(onClick = {
+                                    geminiKey = ""
+                                    geminiValidationState = KeyValidationState.Missing
+                                    app.aiProviderManager.setGeminiKey("")
+                                }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "Clear Key",
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("gemini_key_input_settings")
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // --- DETAILED USER-FRIENDLY VALIDATION STATUS / ERROR MESSAGES & RETRY ---
+                when (val state = geminiValidationState) {
+                    is KeyValidationState.Missing -> {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = StatusError.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, StatusError.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("gemini_missing_error_card")
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Icon(
+                                        imageVector = Icons.Default.KeyOff,
+                                        contentDescription = null,
+                                        tint = StatusError,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = "Gemini API Key Required",
+                                            color = StatusError,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "EVA needs a valid Gemini API key to understand voice commands and provide intelligent responses. Generate a free key in Google AI Studio to activate.",
+                                            color = TextPrimary,
+                                            fontSize = 12.sp,
+                                            lineHeight = 16.sp
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            val clipboardText = clipboardManager?.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                                            if (clipboardText.isNotBlank()) {
+                                                geminiKey = clipboardText.trim().trim('"', '\'')
+                                                triggerGeminiValidation(isRetry = false)
+                                            } else {
+                                                Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Paste Key", fontSize = 12.sp)
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            try {
+                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/app/apikey"))
+                                                context.startActivity(intent)
+                                            } catch (_: Exception) {
+                                                Toast.makeText(context, "Visit https://aistudio.google.com/app/apikey", Toast.LENGTH_LONG).show()
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = CosmicDarkBackground),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Get Key", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    is KeyValidationState.Malformed -> {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = StatusWarning.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, StatusWarning.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("gemini_malformed_error_card")
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = StatusWarning,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = "Invalid Key Format: ${state.reason}",
+                                            color = StatusWarning,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = state.tip,
+                                            color = TextPrimary,
+                                            fontSize = 12.sp,
+                                            lineHeight = 16.sp
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        geminiKey = app.aiProviderManager.geminiKeyValidator.sanitizeKey(geminiKey)
+                                        triggerGeminiValidation(isRetry = false)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = StatusWarning, contentColor = CosmicDarkBackground),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Clean & Test Key", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    is KeyValidationState.Validating -> {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = NeonCyan.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("gemini_validating_card")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = NeonCyan,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Authenticating with Google Gemini...",
+                                        color = NeonCyan,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Connecting to Google servers (attempt ${state.attempt} of ${state.maxAttempts})...",
+                                        color = TextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    is KeyValidationState.Failed -> {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = StatusError.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, StatusError.copy(alpha = 0.45f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("gemini_failed_error_card")
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Icon(
+                                        imageVector = Icons.Default.ErrorOutline,
+                                        contentDescription = null,
+                                        tint = StatusError,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = state.reason,
+                                            color = StatusError,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = state.userFriendlyMessage,
+                                            color = TextPrimary,
+                                            fontSize = 12.sp,
+                                            lineHeight = 16.sp
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Tip: ${state.suggestedAction}",
+                                            color = TextSecondary,
+                                            fontSize = 11.sp,
+                                            lineHeight = 15.sp
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // --- RETRY MECHANISM BUTTON ---
+                                Button(
+                                    onClick = { triggerGeminiValidation(isRetry = true) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = StatusError,
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("gemini_retry_authentication_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Retry",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (retryCount > 0) "Retry Re-Authentication (Attempt #${retryCount + 1})" else "Retry Authentication",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    is KeyValidationState.Success -> {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = StatusSuccess.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, StatusSuccess.copy(alpha = 0.45f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("gemini_success_card")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = StatusSuccess,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = "Gemini API Key Verified",
+                                            color = StatusSuccess,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "${state.message} (${state.latencyMs}ms)",
+                                            color = TextPrimary,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+
+                                IconButton(
+                                    onClick = { triggerGeminiValidation(isRetry = true) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Re-check",
+                                        tint = StatusSuccess,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    KeyValidationState.Idle -> {
+                        // Action row to test or obtain key
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { triggerGeminiValidation(isRetry = false) },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("gemini_test_button")
+                            ) {
+                                Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Validate Key")
+                            }
+
+                            TextButton(
+                                onClick = {
+                                    try {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/app/apikey"))
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Visit aistudio.google.com/app/apikey", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.OpenInNew, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Get API Key", color = TextSecondary, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Gemini Model Selection & Quick Select Chips
+                Text(
+                    text = "Gemini Model Selection",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val recommendedModels = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
+                    recommendedModels.forEach { m ->
+                        FilterChip(
+                            selected = geminiModel == m,
+                            onClick = {
+                                geminiModel = m
+                                app.preferences.setGeminiModel(m)
+                            },
+                            label = { Text(m, fontSize = 11.sp) }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = geminiModel,
+                    onValueChange = {
+                        geminiModel = it
+                        app.preferences.setGeminiModel(it)
+                    },
+                    label = { Text("Custom Model ID") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // --- OMNIROUTE CONFIGURATION CARD ---
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Hub,
+                        contentDescription = "OmniRoute",
+                        tint = ElectricViolet,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "OmniRoute (Self-Hosted / Proxy)",
+                        color = TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = omniKey,
+                    onValueChange = { omniKey = it },
+                    label = { Text("OmniRoute API Key") },
+                    singleLine = true,
+                    visualTransformation = if (showOmniKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showOmniKey = !showOmniKey }) {
+                            Icon(
+                                imageVector = if (showOmniKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (showOmniKey) "Hide" else "Show",
+                                tint = TextSecondary
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = omniUrl,
+                    onValueChange = {
+                        omniUrl = it
+                        app.preferences.setOmniRouteBaseUrl(it)
+                    },
+                    label = { Text("OmniRoute Base URL") },
+                    placeholder = { Text("https://your-omniroute-instance.com/v1") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = omniModel,
+                    onValueChange = {
+                        omniModel = it
+                        app.preferences.setOmniRouteModel(it)
+                    },
+                    label = { Text("OmniRoute Model ID") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Save Feedback Banner (if any)
+        saveFeedbackMessage?.let { msg ->
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = StatusSuccess.copy(alpha = 0.15f),
+                border = BorderStroke(1.dp, StatusSuccess.copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = StatusSuccess)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(msg, color = StatusSuccess, fontSize = 13.sp)
+                }
+            }
+        }
+
+        // Save API Settings Button
         Button(
             onClick = {
-                app.aiProviderManager.setGeminiKey(geminiKey.trim())
-                app.aiProviderManager.setOmniRouteKey(omniKey.trim())
+                val cleanGemini = app.aiProviderManager.geminiKeyValidator.sanitizeKey(geminiKey)
+                val cleanOmni = omniKey.trim().trim('"', '\'')
+                geminiKey = cleanGemini
+                omniKey = cleanOmni
+
+                app.aiProviderManager.setGeminiKey(cleanGemini)
+                app.aiProviderManager.setOmniRouteKey(cleanOmni)
                 app.preferences.setGeminiModel(geminiModel.trim())
                 app.preferences.setOmniRouteModel(omniModel.trim())
                 app.preferences.setOmniRouteBaseUrl(omniUrl.trim())
+
+                if (cleanGemini.isNotBlank()) {
+                    triggerGeminiValidation(isRetry = false)
+                    saveFeedbackMessage = "Settings saved! Verifying Gemini authentication..."
+                } else {
+                    geminiValidationState = KeyValidationState.Missing
+                    saveFeedbackMessage = "API Settings saved. Note: Gemini API key is missing."
+                    Toast.makeText(context, "Gemini key is missing. Add key to enable Gemini features.", Toast.LENGTH_LONG).show()
+                }
             },
             colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = CosmicDarkBackground),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .testTag("save_api_settings_button")
         ) {
-            Text("Save API Settings", fontWeight = FontWeight.Bold)
+            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Save API Settings", fontWeight = FontWeight.Bold, fontSize = 15.sp)
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 

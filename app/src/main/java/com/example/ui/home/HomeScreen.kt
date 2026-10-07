@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import com.example.EvaApplication
 import com.example.ui.components.AnimatedVoiceOrb
 import com.example.ui.components.OrbState
+import com.example.ui.components.ScreenCornerGlow
 import com.example.ui.theme.*
 import com.example.voice.SpeechCleaner
 import com.example.voice.WakeWordDetector
@@ -200,7 +201,8 @@ fun HomeScreen(
         }
     }
 
-    Scaffold(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
         topBar = {
             Row(
                 modifier = Modifier
@@ -588,4 +590,13 @@ fun HomeScreen(
             containerColor = DarkSurface
         )
     }
+
+    // Subtle futuristic glowing corner animation
+    ScreenCornerGlow(
+        isActive = isListening || isSpeaking || orbState != OrbState.IDLE,
+        orbState = orbState,
+        amplitude = micAmplitude,
+        modifier = Modifier.fillMaxSize()
+    )
+}
 }

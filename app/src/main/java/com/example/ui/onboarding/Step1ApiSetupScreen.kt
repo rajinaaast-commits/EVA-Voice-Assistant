@@ -169,10 +169,16 @@ fun Step1ApiSetupScreen(
                 ) {
                     OutlinedButton(
                         onClick = {
+                            val clean = app.aiProviderManager.geminiKeyValidator.sanitizeKey(geminiKeyInput)
+                            geminiKeyInput = clean
                             coroutineScope.launch {
                                 geminiStatus = ConnectionStatus.Testing
-                                val result = app.aiProviderManager.geminiProvider.testConnection(geminiKeyInput)
+                                val result = app.aiProviderManager.geminiProvider.testConnection(clean)
                                 geminiStatus = result
+                                if (result is ConnectionStatus.Connected) {
+                                    app.aiProviderManager.setGeminiKey(clean)
+                                    saveSuccessMessage = "Gemini key verified and connected!"
+                                }
                             }
                         },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
@@ -183,10 +189,18 @@ fun Step1ApiSetupScreen(
 
                     Button(
                         onClick = {
-                            app.aiProviderManager.setGeminiKey(geminiKeyInput.trim())
-                            saveSuccessMessage = "Gemini key saved securely!"
+                            val clean = app.aiProviderManager.geminiKeyValidator.sanitizeKey(geminiKeyInput)
+                            geminiKeyInput = clean
+                            app.aiProviderManager.setGeminiKey(clean)
                             coroutineScope.launch {
-                                geminiStatus = app.aiProviderManager.testGeminiConnection()
+                                geminiStatus = ConnectionStatus.Testing
+                                val result = app.aiProviderManager.testGeminiConnection()
+                                geminiStatus = result
+                                saveSuccessMessage = if (result is ConnectionStatus.Connected) {
+                                    "Gemini key verified and saved securely!"
+                                } else {
+                                    "Gemini key saved securely!"
+                                }
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = CosmicDarkBackground),
