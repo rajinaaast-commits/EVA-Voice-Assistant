@@ -1,0 +1,6 @@
+{
+  "name": "EVA AI",
+  "description": "Your intelligent personal AI companion powered by Gemini and OmniRoute.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
