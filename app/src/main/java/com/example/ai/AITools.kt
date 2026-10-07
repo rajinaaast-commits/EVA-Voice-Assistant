@@ -19,6 +19,60 @@ data class ToolExecutionResult(
 object AIToolRegistry {
     val availableTools = listOf(
         AIToolDefinition(
+            name = "open_app",
+            description = "Launch an Android application on device (e.g. Termux, YouTube, Chrome, WhatsApp, Calculator, Settings).",
+            isSensitive = false,
+            parametersJson = """{"app_name": "app name or package e.g. termux, youtube"}"""
+        ),
+        AIToolDefinition(
+            name = "open_settings",
+            description = "Open an Android settings screen (wifi, bluetooth, accessibility, battery, display, notification, sound).",
+            isSensitive = false,
+            parametersJson = """{"setting": "wifi|bluetooth|accessibility|battery|display|notification|sound"}"""
+        ),
+        AIToolDefinition(
+            name = "go_home",
+            description = "Navigate to the Android Home screen.",
+            isSensitive = false,
+            parametersJson = """{}"""
+        ),
+        AIToolDefinition(
+            name = "go_back",
+            description = "Perform the Android Back navigation.",
+            isSensitive = false,
+            parametersJson = """{}"""
+        ),
+        AIToolDefinition(
+            name = "open_recents",
+            description = "Open Android recent apps switcher.",
+            isSensitive = false,
+            parametersJson = """{}"""
+        ),
+        AIToolDefinition(
+            name = "adjust_volume",
+            description = "Raise or lower the device media/ringer volume.",
+            isSensitive = false,
+            parametersJson = """{"direction": "up|down"}"""
+        ),
+        AIToolDefinition(
+            name = "scroll_screen",
+            description = "Scroll the active screen up or down.",
+            isSensitive = false,
+            parametersJson = """{"direction": "up|down"}"""
+        ),
+        AIToolDefinition(
+            name = "read_screen",
+            description = "Read all visible UI text on the screen using Accessibility Service.",
+            isSensitive = false,
+            parametersJson = """{}"""
+        ),
+        AIToolDefinition(
+            name = "termux_execute",
+            description = "Run a terminal command or script in Termux.",
+            isSensitive = true,
+            parametersJson = """{"command": "bash command to execute"}"""
+        ),
+        AIToolDefinition(
             name = "search_web",
             description = "Search the web or get real-time facts and answers.",
             isSensitive = false,

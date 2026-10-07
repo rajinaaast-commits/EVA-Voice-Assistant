@@ -78,11 +78,30 @@ fun Step2PermissionsScreen(
 
     val singlePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
+    ) { _ ->
         permissionStates = permissionList.associate { item ->
             item.permissionManifest to checkPermission(context, item.permissionManifest)
         }
     }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                permissionStates = permissionList.associate { item ->
+                    item.permissionManifest to checkPermission(context, item.permissionManifest)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val grantedCount = permissionStates.values.count { it }
+    val totalCount = permissionList.size
+    val microphoneVerified = permissionStates[Manifest.permission.RECORD_AUDIO] == true
 
     Column(
         modifier = Modifier
@@ -165,6 +184,44 @@ fun Step2PermissionsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        if (microphoneVerified) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = StatusSuccess.copy(alpha = 0.15f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, StatusSuccess),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+                    .testTag("permissions_verified_banner")
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Verified",
+                        tint = StatusSuccess,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Permission Verified",
+                            color = StatusSuccess,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (grantedCount == totalCount) "All system permissions are granted!" else "EVA microphone is verified ($grantedCount/$totalCount permissions enabled).",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+
         // Permission Items List
         permissionList.forEach { item ->
             val isAllowed = permissionStates[item.permissionManifest] ?: false
@@ -230,13 +287,24 @@ fun Step2PermissionsScreen(
                             shape = RoundedCornerShape(8.dp),
                             color = StatusSuccess.copy(alpha = 0.15f)
                         ) {
-                            Text(
-                                text = "Allowed",
-                                color = StatusSuccess,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
+                            ) {
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = StatusSuccess,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Verified",
+                                    color = StatusSuccess,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     } else {
                         FilledTonalButton(

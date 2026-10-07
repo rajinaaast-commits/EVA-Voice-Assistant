@@ -91,6 +91,7 @@ fun HomeScreen(
     // Default widgets list with enable/reorder support
     val activeWidgets = remember {
         mutableStateListOf(
+            HomeWidget("device", "Device Control", "Apps, Navigation & Termux", Icons.Default.Bolt, NeonCyan, "device"),
             HomeWidget("weather", "24°C Partly Cloudy", "High 27° • Humidity 62%", Icons.Default.WbSunny, Color(0xFFFFB300), "weather"),
             HomeWidget("study", "Study Focus", "2 tasks scheduled today", Icons.Default.MenuBook, NeonCyan, "study"),
             HomeWidget("music", "Deep Flow Beats", "Ambient Synthwave 112 BPM", Icons.Default.MusicNote, ElectricViolet, "music"),
@@ -112,6 +113,9 @@ fun HomeScreen(
         }
     }
 
+    var activeDeviceAction by remember { mutableStateOf<com.example.device.DeviceActionResult?>(null) }
+    var isContinuousVoiceMode by remember { mutableStateOf(false) }
+
     // Pipeline voice command handler
     fun processVoiceCommand(rawUtterance: String) {
         coroutineScope.launch {
@@ -120,14 +124,15 @@ fun HomeScreen(
             if (wakeResult.detected) {
                 orbState = OrbState.WAKE_DETECTED
                 wakeWordDetectedNotice = "Recognized: \"${wakeResult.matchedPhrase}\""
-                delay(400)
+                isContinuousVoiceMode = true
+                delay(300)
             }
 
             // 2. Disfluency cleaning (umm, uh, contextual like)
             val cleanedCommand = SpeechCleaner.clean(wakeResult.cleanCommand)
 
             if (cleanedCommand.isBlank()) {
-                assistantDialogue = "I heard you! How can I help you?"
+                assistantDialogue = "I'm listening. What would you like me to do?"
                 orbState = OrbState.SPEAKING
                 app.ttsHelper.speak(assistantDialogue)
                 return@launch
@@ -136,21 +141,30 @@ fun HomeScreen(
             assistantDialogue = "Command: \"$cleanedCommand\""
             orbState = OrbState.THINKING
 
-            // 3. Check for direct device launch commands (e.g. "open YouTube")
-            if (cleanedCommand.lowercase(Locale.ROOT).contains("youtube")) {
-                assistantDialogue = "Opening YouTube."
-                orbState = OrbState.SPEAKING
-                app.ttsHelper.speak("Opening YouTube.")
-                try {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com"))
-                    context.startActivity(intent)
-                } catch (_: Exception) {}
-                delay(1200)
-                orbState = OrbState.IDLE
+            // 3. FAST PATH: Native Android Device Control Engine
+            val directDeviceAction = app.deviceControlManager.tryParseAndExecuteCommand(cleanedCommand)
+            if (directDeviceAction != null) {
+                activeDeviceAction = directDeviceAction
+                assistantDialogue = directDeviceAction.message
+                orbState = if (directDeviceAction.success) OrbState.SPEAKING else OrbState.ERROR
+                app.ttsHelper.speak(directDeviceAction.message)
+                
+                // Allow sequential tasks: "open youtube" -> then "search top bangla songs"
+                delay(2200)
+                if (isContinuousVoiceMode) {
+                    delay(400)
+                    orbState = OrbState.LISTENING
+                    app.speechHelper.startListening(
+                        onFinalResult = { nextText -> processVoiceCommand(nextText) },
+                        onError = { orbState = OrbState.IDLE }
+                    )
+                } else {
+                    orbState = OrbState.IDLE
+                }
                 return@launch
             }
 
-            // 4. Send to AI Provider Manager
+            // 4. Send to AI Provider Manager (Gemini / OmniRoute)
             val response = app.aiProviderManager.generateResponse(prompt = cleanedCommand)
 
             if (response.isSuccess) {
@@ -164,6 +178,19 @@ fun HomeScreen(
                     if (toolResult.requiresConfirmation) {
                         Toast.makeText(context, toolResult.pendingActionDescription ?: "Confirmation required", Toast.LENGTH_LONG).show()
                     }
+                }
+
+                // If continuous mode active, listen for next command after response
+                if (isContinuousVoiceMode) {
+                    delay(3000)
+                    orbState = OrbState.LISTENING
+                    app.speechHelper.startListening(
+                        onFinalResult = { nextText -> processVoiceCommand(nextText) },
+                        onError = { orbState = OrbState.IDLE }
+                    )
+                } else {
+                    delay(1500)
+                    orbState = OrbState.IDLE
                 }
             } else {
                 assistantDialogue = response.text
@@ -225,6 +252,7 @@ fun HomeScreen(
                     modifier = Modifier.padding(bottom = 8.dp)
                 ) {
                     val quickActions = listOf(
+                        "⚡ Controls" to onNavigateToSettings,
                         "Ask EVA" to { onNavigateToChat(null) },
                         "Search" to { onNavigateToChat("Search for recent tech innovations in 2026") },
                         "Study" to onNavigateToStudy,
@@ -485,6 +513,7 @@ fun HomeScreen(
                                     .weight(1f)
                                     .clickable {
                                         when (widget.routeTarget) {
+                                            "device" -> onNavigateToSettings()
                                             "study" -> onNavigateToStudy()
                                             "weather" -> onNavigateToChat("What is today's detailed weather forecast?")
                                             "journal" -> onNavigateToChat("Summarize my recent memory journal")

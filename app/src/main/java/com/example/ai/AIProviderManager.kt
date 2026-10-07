@@ -16,7 +16,8 @@ class AIProviderManager(
     private val context: Context,
     private val secureStorage: SecureKeyStorage,
     private val preferences: EvaPreferences,
-    private val database: EvaDatabase
+    private val database: EvaDatabase,
+    val deviceControlManager: com.example.device.DeviceControlManager
 ) {
     val geminiProvider = GeminiProvider()
     val omniRouteProvider = OmniRouteProvider()
@@ -265,6 +266,85 @@ class AIProviderManager(
                     toolName = "Weather",
                     success = true,
                     output = "Weather in $loc: 24°C, Partly Cloudy, Humidity 62%, Wind 11 km/h."
+                )
+            }
+            "open_app" -> {
+                val appName = args.optString("app_name", "")
+                val res = deviceControlManager.openApp(appName)
+                ToolExecutionResult(
+                    toolName = "App Launcher",
+                    success = res.success,
+                    output = res.message
+                )
+            }
+            "open_settings" -> {
+                val setting = args.optString("setting", "settings")
+                val res = deviceControlManager.openSettingsPage(setting)
+                ToolExecutionResult(
+                    toolName = "Settings Control",
+                    success = res.success,
+                    output = res.message
+                )
+            }
+            "go_home" -> {
+                val res = deviceControlManager.goHome()
+                ToolExecutionResult(
+                    toolName = "Go Home",
+                    success = res.success,
+                    output = res.message
+                )
+            }
+            "go_back" -> {
+                val res = deviceControlManager.goBack()
+                ToolExecutionResult(
+                    toolName = "Go Back",
+                    success = res.success,
+                    output = res.message
+                )
+            }
+            "open_recents" -> {
+                val res = deviceControlManager.openRecents()
+                ToolExecutionResult(
+                    toolName = "Open Recents",
+                    success = res.success,
+                    output = res.message
+                )
+            }
+            "adjust_volume" -> {
+                val dir = args.optString("direction", "up")
+                val res = deviceControlManager.adjustVolume(dir.equals("up", ignoreCase = true))
+                ToolExecutionResult(
+                    toolName = "Volume Control",
+                    success = res.success,
+                    output = res.message
+                )
+            }
+            "scroll_screen" -> {
+                val dir = args.optString("direction", "down")
+                val res = deviceControlManager.scroll(dir.equals("down", ignoreCase = true))
+                ToolExecutionResult(
+                    toolName = "Screen Scroll",
+                    success = res.success,
+                    output = res.message
+                )
+            }
+            "read_screen" -> {
+                val res = deviceControlManager.readScreen()
+                ToolExecutionResult(
+                    toolName = "Read Screen",
+                    success = res.success,
+                    output = res.message
+                )
+            }
+            "termux_execute" -> {
+                val cmd = args.optString("command", "")
+                val res = deviceControlManager.handleTermuxCommand(cmd)
+                ToolExecutionResult(
+                    toolName = "Termux",
+                    success = res.success,
+                    output = res.message,
+                    requiresConfirmation = true,
+                    pendingActionDescription = "Execute in Termux: \"$cmd\"?"
                 )
             }
             "music_control" -> {

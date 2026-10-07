@@ -97,6 +97,20 @@ fun ChatScreen(
                     ConversationEntity(id = activeConversationId, title = promptToSend.take(30))
                 )
 
+                val directDeviceAction = app.deviceControlManager.tryParseAndExecuteCommand(promptToSend)
+                if (directDeviceAction != null) {
+                    val assistantMsg = MessageEntity(
+                        id = "msg_${System.currentTimeMillis() + 1}",
+                        conversationId = activeConversationId,
+                        sender = "eva",
+                        content = directDeviceAction.message,
+                        providerUsed = "Device Control"
+                    )
+                    app.database.messageDao().insertMessage(assistantMsg)
+                    app.ttsHelper.speak(directDeviceAction.message)
+                    return@launch
+                }
+
                 isGenerating = true
                 currentStreamingChunk = ""
                 val history = messages.map { it.sender to it.content }
@@ -154,6 +168,23 @@ fun ChatScreen(
                 app.database.conversationDao().insertConversation(
                     ConversationEntity(id = activeConversationId, title = title)
                 )
+            }
+
+            // Direct device control fast path
+            val directDeviceAction = app.deviceControlManager.tryParseAndExecuteCommand(currentText)
+            if (directDeviceAction != null) {
+                val assistantMsg = MessageEntity(
+                    id = "msg_${System.currentTimeMillis() + 1}",
+                    conversationId = activeConversationId,
+                    sender = "eva",
+                    content = directDeviceAction.message,
+                    providerUsed = "Device Control"
+                )
+                app.database.messageDao().insertMessage(assistantMsg)
+                isGenerating = false
+                currentStreamingChunk = ""
+                app.ttsHelper.speak(directDeviceAction.message)
+                return@launch
             }
 
             val history = messages.map { it.sender to it.content }

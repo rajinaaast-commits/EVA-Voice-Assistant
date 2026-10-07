@@ -20,25 +20,27 @@ class GeminiProvider : AIProvider {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    private val baseUrl = "https://generativelanguage.googleapis.com/v1beta"
+    companion object {
+        private const val DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+    }
+
+    private fun resolveUrl(customBaseUrl: String?): String {
+        return if (!customBaseUrl.isNullOrBlank()) {
+            customBaseUrl.trim().removeSuffix("/")
+        } else {
+            DEFAULT_GEMINI_BASE_URL
+        }
+    }
 
     override suspend fun testConnection(apiKey: String, baseUrl: String?): ConnectionStatus =
         withContext(Dispatchers.IO) {
             if (apiKey.isBlank()) return@withContext ConnectionStatus.NotConfigured
             try {
-                val url = "$baseUrl/models/gemini-3.5-flash:generateContent?key=$apiKey"
-                val bodyJson = JSONObject().apply {
-                    put("contents", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("parts", JSONArray().apply {
-                                put(JSONObject().apply { put("text", "ping") })
-                            })
-                        })
-                    })
-                }
+                val effectiveBaseUrl = resolveUrl(baseUrl)
+                val url = "$effectiveBaseUrl/models?key=$apiKey"
                 val request = Request.Builder()
                     .url(url)
-                    .post(bodyJson.toString().toRequestBody("application/json".toMediaType()))
+                    .get()
                     .build()
 
                 client.newCall(request).execute().use { response ->
@@ -72,12 +74,13 @@ class GeminiProvider : AIProvider {
             )
         }
 
-        val targetModel = if (model.isBlank() || model == "auto") "gemini-3.5-flash" else model
+        val targetModel = if (model.isBlank() || model == "auto" || model == "gemini-3.5-flash") "gemini-2.5-flash" else model
         val isStream = onChunk != null
+        val effectiveBaseUrl = resolveUrl(baseUrl)
         val endpoint = if (isStream) {
-            "$baseUrl/models/$targetModel:streamGenerateContent?alt=sse&key=$apiKey"
+            "$effectiveBaseUrl/models/$targetModel:streamGenerateContent?alt=sse&key=$apiKey"
         } else {
-            "$baseUrl/models/$targetModel:generateContent?key=$apiKey"
+            "$effectiveBaseUrl/models/$targetModel:generateContent?key=$apiKey"
         }
 
         try {
@@ -191,14 +194,15 @@ class GeminiProvider : AIProvider {
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> =
         withContext(Dispatchers.IO) {
             val defaultModels = listOf(
-                "gemini-3.5-flash",
-                "gemini-3.1-pro-preview",
-                "gemini-3.1-flash-lite-preview",
-                "gemini-2.5-flash-image"
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-2.0-flash",
+                "gemini-1.5-flash"
             )
             if (apiKey.isBlank()) return@withContext defaultModels
             try {
-                val url = "$baseUrl/models?key=$apiKey"
+                val effectiveBaseUrl = resolveUrl(baseUrl)
+                val url = "$effectiveBaseUrl/models?key=$apiKey"
                 val request = Request.Builder().url(url).get().build()
                 client.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">EVA AI</string>
+    <string name="accessibility_service_description">Enables EVA AI to assist with device navigation, scrolling, tapping on visible controls, and performing voice-directed Android tasks.</string>
 </resources>

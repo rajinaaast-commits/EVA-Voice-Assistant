@@ -60,8 +60,10 @@ class EvaPreferences(context: Context) {
         _providerMode.value = mode
     }
 
-    fun getGeminiModel(): String =
-        prefs.getString("gemini_model", "gemini-3.5-flash") ?: "gemini-3.5-flash"
+    fun getGeminiModel(): String {
+        val model = prefs.getString("gemini_model", "gemini-2.5-flash") ?: "gemini-2.5-flash"
+        return if (model == "gemini-3.5-flash") "gemini-2.5-flash" else model
+    }
 
     fun setGeminiModel(model: String) {
         prefs.edit().putString("gemini_model", model).apply()

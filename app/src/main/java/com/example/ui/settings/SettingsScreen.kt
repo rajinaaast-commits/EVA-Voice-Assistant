@@ -33,12 +33,15 @@ import kotlinx.coroutines.launch
 
 enum class SettingsSubpage {
     MAIN,
+    DEVICE_CONTROL,
     API_KEYS,
     EVA_PERSONA,
     MEMORY,
     VOICE_SETTINGS,
     VOICE_ENGINE,
     VOICE_PROFILE,
+    TELEGRAM_BOT,
+    GMAIL_SMTP,
     SECRET_SETTINGS,
     SUBSCRIPTION,
     ABOUT
@@ -55,6 +58,10 @@ fun SettingsScreen(
 
     var activeSubpage by remember { mutableStateOf(SettingsSubpage.MAIN) }
 
+    androidx.activity.compose.BackHandler(enabled = activeSubpage != SettingsSubpage.MAIN) {
+        activeSubpage = SettingsSubpage.MAIN
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -62,12 +69,15 @@ fun SettingsScreen(
                     Text(
                         text = when (activeSubpage) {
                             SettingsSubpage.MAIN -> "Settings"
+                            SettingsSubpage.DEVICE_CONTROL -> "Device Control"
                             SettingsSubpage.API_KEYS -> "AI Providers & API Keys"
                             SettingsSubpage.EVA_PERSONA -> "EVA Persona & Tone"
                             SettingsSubpage.MEMORY -> "Memory & Privacy"
                             SettingsSubpage.VOICE_SETTINGS -> "Voice & Audio"
                             SettingsSubpage.VOICE_ENGINE -> "Voice Engine Architecture"
                             SettingsSubpage.VOICE_PROFILE -> "Voice Recognition Profile"
+                            SettingsSubpage.TELEGRAM_BOT -> "Telegram Bot Integration"
+                            SettingsSubpage.GMAIL_SMTP -> "Gmail SMTP Connector"
                             SettingsSubpage.SECRET_SETTINGS -> "Secret Settings"
                             SettingsSubpage.SUBSCRIPTION -> "Subscription & License"
                             SettingsSubpage.ABOUT -> "About EVA AI"
@@ -99,12 +109,15 @@ fun SettingsScreen(
         ) {
             when (activeSubpage) {
                 SettingsSubpage.MAIN -> MainSettingsMenu(onSelectSubpage = { activeSubpage = it })
+                SettingsSubpage.DEVICE_CONTROL -> DeviceControlSettingsView()
                 SettingsSubpage.API_KEYS -> ApiKeysSettingsView()
                 SettingsSubpage.EVA_PERSONA -> PersonaSettingsView()
                 SettingsSubpage.MEMORY -> MemorySettingsView()
                 SettingsSubpage.VOICE_SETTINGS -> VoiceSettingsView()
                 SettingsSubpage.VOICE_ENGINE -> VoiceEngineSettingsView()
                 SettingsSubpage.VOICE_PROFILE -> VoiceProfileSettingsView()
+                SettingsSubpage.TELEGRAM_BOT -> TelegramBotSettingsView()
+                SettingsSubpage.GMAIL_SMTP -> GmailSmtpSettingsView()
                 SettingsSubpage.SECRET_SETTINGS -> SecretSettingsView()
                 SettingsSubpage.SUBSCRIPTION -> SubscriptionSettingsView()
                 SettingsSubpage.ABOUT -> AboutView()
@@ -116,12 +129,15 @@ fun SettingsScreen(
 @Composable
 fun MainSettingsMenu(onSelectSubpage: (SettingsSubpage) -> Unit) {
     val items = listOf(
+        Triple("⚡ Device Control", "App Launcher, Android Intents, Accessibility & Termux", SettingsSubpage.DEVICE_CONTROL),
         Triple("AI Providers & Keys", "Configure Gemini & OmniRoute keys and models", SettingsSubpage.API_KEYS),
         Triple("EVA Persona", "Personalize name, tone, custom instructions", SettingsSubpage.EVA_PERSONA),
         Triple("Memory & Privacy", "Persistent autonomous memories & incognito toggle", SettingsSubpage.MEMORY),
         Triple("Voice & Audio", "Select from 10 voices, speed, pitch, interrupt", SettingsSubpage.VOICE_SETTINGS),
         Triple("Voice Engine", "Swift, Soul, or Advanced Agentic Ear-Brain-Voice", SettingsSubpage.VOICE_ENGINE),
         Triple("Voice Profile", "Train your voice match & anti-spoof sensitivity", SettingsSubpage.VOICE_PROFILE),
+        Triple("Telegram Bot", "Chat & Voice message integration via Bot API", SettingsSubpage.TELEGRAM_BOT),
+        Triple("Gmail SMTP", "Send and draft emails via secure SMTP", SettingsSubpage.GMAIL_SMTP),
         Triple("Secret Settings", "Personality modes: Friendly, Romantic, Intense (18+)", SettingsSubpage.SECRET_SETTINGS),
         Triple("Subscription & License", "Free, Premium, Pro, Max comparison & activation", SettingsSubpage.SUBSCRIPTION),
         Triple("About EVA AI", "Version 1.0.0 by Aura RIFAT", SettingsSubpage.ABOUT)
