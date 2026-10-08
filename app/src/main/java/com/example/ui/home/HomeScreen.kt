@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -24,14 +25,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.EvaApplication
 import com.example.ui.components.AnimatedVoiceOrb
 import com.example.ui.components.OrbState
@@ -87,6 +92,23 @@ fun HomeScreen(
         } else if (orbState == OrbState.SPEAKING || orbState == OrbState.LISTENING) {
             orbState = OrbState.IDLE
         }
+    }
+
+    // Bidirectional sync with centralized EvaStateManager
+    LaunchedEffect(orbState) {
+        when (orbState) {
+            OrbState.SPEAKING -> com.example.voice.EvaStateManager.setSpeaking()
+            OrbState.LISTENING -> com.example.voice.EvaStateManager.setListening()
+            OrbState.WAKE_DETECTED -> com.example.voice.EvaStateManager.setWake()
+            OrbState.THINKING, OrbState.PROCESSING -> com.example.voice.EvaStateManager.setThinking()
+            OrbState.ERROR -> com.example.voice.EvaStateManager.setError()
+            OrbState.OFFLINE -> com.example.voice.EvaStateManager.setOffline()
+            OrbState.IDLE -> com.example.voice.EvaStateManager.setIdle()
+        }
+    }
+
+    LaunchedEffect(micAmplitude) {
+        com.example.voice.EvaStateManager.updateAmplitude(micAmplitude)
     }
 
     // Default widgets list with enable/reorder support
@@ -216,12 +238,18 @@ fun HomeScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         shape = CircleShape,
-                        color = NeonCyan.copy(alpha = 0.15f),
+                        color = NeonCyan.copy(alpha = 0.2f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f)),
                         modifier = Modifier.size(38.dp)
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = "EVA Logo", tint = NeonCyan, modifier = Modifier.size(20.dp))
-                        }
+                        Image(
+                            painter = painterResource(id = R.drawable.ic_eva_logo_1791388278820),
+                            contentDescription = "EVA Logo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                        )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {

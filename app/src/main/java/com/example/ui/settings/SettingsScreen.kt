@@ -51,6 +51,7 @@ enum class SettingsSubpage {
     TELEGRAM_BOT,
     GMAIL_SMTP,
     SECRET_SETTINGS,
+    EDGE_GLOW,
     SUBSCRIPTION,
     ABOUT
 }
@@ -87,6 +88,7 @@ fun SettingsScreen(
                             SettingsSubpage.TELEGRAM_BOT -> "Telegram Bot Integration"
                             SettingsSubpage.GMAIL_SMTP -> "Gmail SMTP Connector"
                             SettingsSubpage.SECRET_SETTINGS -> "Secret Settings"
+                            SettingsSubpage.EDGE_GLOW -> "EVA Edge Glow Overlay"
                             SettingsSubpage.SUBSCRIPTION -> "Subscription & License"
                             SettingsSubpage.ABOUT -> "About EVA AI"
                         },
@@ -127,6 +129,7 @@ fun SettingsScreen(
                 SettingsSubpage.TELEGRAM_BOT -> TelegramBotSettingsView()
                 SettingsSubpage.GMAIL_SMTP -> GmailSmtpSettingsView()
                 SettingsSubpage.SECRET_SETTINGS -> SecretSettingsView()
+                SettingsSubpage.EDGE_GLOW -> EdgeGlowSettingsView()
                 SettingsSubpage.SUBSCRIPTION -> SubscriptionSettingsView()
                 SettingsSubpage.ABOUT -> AboutView()
             }
@@ -139,6 +142,7 @@ fun MainSettingsMenu(onSelectSubpage: (SettingsSubpage) -> Unit) {
     val items = listOf(
         Triple("⚡ Device Control", "App Launcher, Android Intents, Accessibility & Termux", SettingsSubpage.DEVICE_CONTROL),
         Triple("AI Providers & Keys", "Configure Gemini & OmniRoute keys and models", SettingsSubpage.API_KEYS),
+        Triple("✨ EVA Edge Glow", "Corner neon animations, background overlay & voice reaction", SettingsSubpage.EDGE_GLOW),
         Triple("EVA Persona", "Personalize name, tone, custom instructions", SettingsSubpage.EVA_PERSONA),
         Triple("Memory & Privacy", "Persistent autonomous memories & incognito toggle", SettingsSubpage.MEMORY),
         Triple("Voice & Audio", "Select from 10 voices, speed, pitch, interrupt", SettingsSubpage.VOICE_SETTINGS),
@@ -1415,6 +1419,420 @@ fun AboutView() {
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     Text("Wake Words", color = TextSecondary, fontSize = 13.sp)
                     Text("Hey EVA • Wake EVA", color = TextPrimary, fontSize = 13.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EdgeGlowSettingsView() {
+    val context = LocalContext.current
+    val app = EvaApplication.instance
+
+    var edgeGlowEnabled by remember { mutableStateOf(app.preferences.isEdgeGlowEnabled()) }
+    var showWhenClosed by remember { mutableStateOf(app.preferences.isShowEdgeGlowWhenClosed()) }
+    var wakeAnim by remember { mutableStateOf(app.preferences.isWakeAnimationEnabled()) }
+    var listeningAnim by remember { mutableStateOf(app.preferences.isListeningAnimationEnabled()) }
+    var thinkingAnim by remember { mutableStateOf(app.preferences.isThinkingAnimationEnabled()) }
+    var speakingAnim by remember { mutableStateOf(app.preferences.isSpeakingAnimationEnabled()) }
+    var idleAnim by remember { mutableStateOf(app.preferences.isIdleAnimationEnabled()) }
+    var intensity by remember { mutableFloatStateOf(app.preferences.getEdgeGlowIntensity()) }
+    var batterySaver by remember { mutableStateOf(app.preferences.isEdgeGlowBatterySaver()) }
+
+    var hasOverlayPermission by remember {
+        mutableStateOf(
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                android.provider.Settings.canDrawOverlays(context)
+            } else true
+        )
+    }
+
+    val currentEvaState by com.example.voice.EvaStateManager.state.collectAsState()
+    val currentAmp by com.example.voice.EvaStateManager.amplitude.collectAsState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // --- DISPLAY OVER OTHER APPS PERMISSION CARD ---
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (hasOverlayPermission) DarkSurface else StatusWarning.copy(alpha = 0.12f)
+            ),
+            border = BorderStroke(
+                1.dp,
+                if (hasOverlayPermission) StatusSuccess.copy(alpha = 0.4f) else StatusWarning.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (hasOverlayPermission) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = if (hasOverlayPermission) StatusSuccess else StatusWarning,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Display Over Other Apps",
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Text(
+                        text = if (hasOverlayPermission) "Granted" else "Required",
+                        color = if (hasOverlayPermission) StatusSuccess else StatusWarning,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (hasOverlayPermission) {
+                        "EVA has permission to render futuristic edge glowing lines and corner animations above other apps and the home screen."
+                    } else {
+                        "To show the EVA Edge Glow overlay when other apps are open or the screen is minimized, grant 'Display over other apps' in Android settings."
+                    },
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                )
+
+                if (!hasOverlayPermission && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = {
+                            val intent = Intent(
+                                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                android.net.Uri.parse("package:${context.packageName}")
+                            )
+                            try {
+                                context.startActivity(intent)
+                            } catch (_: Exception) {
+                                context.startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = CosmicDarkBackground),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Layers, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Grant Overlay Permission", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // --- INTERACTIVE LIVE PREVIEW CARD ---
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = CosmicDarkBackground),
+            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.35f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Live Interactive Preview",
+                    color = NeonCyan,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Current State: ${currentEvaState.name}",
+                    color = TextSecondary,
+                    fontSize = 12.sp
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Corner glow preview box
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                        .padding(8.dp)
+                ) {
+                    val previewOrbState = when (currentEvaState) {
+                        com.example.voice.EvaState.SPEAKING -> com.example.ui.components.OrbState.SPEAKING
+                        com.example.voice.EvaState.LISTENING -> com.example.ui.components.OrbState.LISTENING
+                        com.example.voice.EvaState.WAKE -> com.example.ui.components.OrbState.WAKE_DETECTED
+                        com.example.voice.EvaState.THINKING -> com.example.ui.components.OrbState.THINKING
+                        com.example.voice.EvaState.ERROR -> com.example.ui.components.OrbState.ERROR
+                        com.example.voice.EvaState.OFFLINE -> com.example.ui.components.OrbState.OFFLINE
+                        com.example.voice.EvaState.IDLE -> com.example.ui.components.OrbState.IDLE
+                    }
+
+                    com.example.ui.components.ScreenCornerGlow(
+                        isActive = currentEvaState != com.example.voice.EvaState.IDLE,
+                        orbState = previewOrbState,
+                        amplitude = currentAmp,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    Text(
+                        text = "EVA EDGE GLOW",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text("Test Animation State:", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf(
+                        com.example.voice.EvaState.IDLE,
+                        com.example.voice.EvaState.WAKE,
+                        com.example.voice.EvaState.LISTENING,
+                        com.example.voice.EvaState.THINKING,
+                        com.example.voice.EvaState.SPEAKING
+                    ).forEach { st ->
+                        FilterChip(
+                            selected = currentEvaState == st,
+                            onClick = {
+                                when (st) {
+                                    com.example.voice.EvaState.IDLE -> com.example.voice.EvaStateManager.setIdle()
+                                    com.example.voice.EvaState.WAKE -> com.example.voice.EvaStateManager.setWake()
+                                    com.example.voice.EvaState.LISTENING -> com.example.voice.EvaStateManager.setListening()
+                                    com.example.voice.EvaState.THINKING -> com.example.voice.EvaStateManager.setThinking()
+                                    com.example.voice.EvaState.SPEAKING -> com.example.voice.EvaStateManager.setSpeaking()
+                                    else -> {}
+                                }
+                            },
+                            label = { Text(st.name, fontSize = 10.sp) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // --- OVERLAY CONTROLS ---
+        ElevatedCard(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = DarkSurface),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    text = "Behavior & Display Options",
+                    color = TextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                // Enable Edge Glow
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Enable Edge Glow", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Display glowing neon corner lines and particles", color = TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = edgeGlowEnabled,
+                        onCheckedChange = {
+                            edgeGlowEnabled = it
+                            app.preferences.setEdgeGlowEnabled(it)
+                            com.example.ui.components.EvaEdgeGlowOverlayManager.getInstance(context).updateOverlayVisibility()
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DarkOutline)
+
+                // Show when app is closed
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Show When App Is Closed", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Maintain floating corner animation over other apps & home screen", color = TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = showWhenClosed,
+                        onCheckedChange = {
+                            showWhenClosed = it
+                            app.preferences.setShowEdgeGlowWhenClosed(it)
+                            if (it) {
+                                com.example.service.EvaVoiceService.startService(context)
+                            }
+                            com.example.ui.components.EvaEdgeGlowOverlayManager.getInstance(context).updateOverlayVisibility()
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DarkOutline)
+
+                // Wake Animation
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Wake Animation", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Radial wave and corner brightening on 'Hey EVA'", color = TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = wakeAnim,
+                        onCheckedChange = {
+                            wakeAnim = it
+                            app.preferences.setWakeAnimationEnabled(it)
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DarkOutline)
+
+                // Listening Animation
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Listening Animation", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Dynamic emerald audio expansion responding to voice", color = TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = listeningAnim,
+                        onCheckedChange = {
+                            listeningAnim = it
+                            app.preferences.setListeningAnimationEnabled(it)
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DarkOutline)
+
+                // Thinking Animation
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Thinking Animation", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Rotating light particles & arcs during AI processing", color = TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = thinkingAnim,
+                        onCheckedChange = {
+                            thinkingAnim = it
+                            app.preferences.setThinkingAnimationEnabled(it)
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DarkOutline)
+
+                // Speaking Animation
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Speaking Animation", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Rhythmic speech wave pulses synchronized with TTS voice", color = TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = speakingAnim,
+                        onCheckedChange = {
+                            speakingAnim = it
+                            app.preferences.setSpeakingAnimationEnabled(it)
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DarkOutline)
+
+                // Idle Animation
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Idle Animation", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Slow breathing pulse and ambient corner halos", color = TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = idleAnim,
+                        onCheckedChange = {
+                            idleAnim = it
+                            app.preferences.setIdleAnimationEnabled(it)
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DarkOutline)
+
+                // Animation Intensity Slider
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Animation Intensity", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("${(intensity * 100).toInt()}%", color = NeonCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Slider(
+                        value = intensity,
+                        onValueChange = {
+                            intensity = it
+                            app.preferences.setEdgeGlowIntensity(it)
+                        },
+                        valueRange = 0.2f..1.5f,
+                        colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
+                    )
+                }
+
+                HorizontalDivider(color = DarkOutline)
+
+                // Battery Saver Mode
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Battery Saver Mode", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Limits rendering rate & pauses idle particle computations", color = TextSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = batterySaver,
+                        onCheckedChange = {
+                            batterySaver = it
+                            app.preferences.setEdgeGlowBatterySaver(it)
+                        }
+                    )
                 }
             }
         }

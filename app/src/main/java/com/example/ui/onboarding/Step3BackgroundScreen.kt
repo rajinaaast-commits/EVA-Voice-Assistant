@@ -1,11 +1,16 @@
 package com.example.ui.onboarding
 
+import android.Manifest
+import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -24,11 +29,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.EvaApplication
 import com.example.service.EVAAccessibilityService
+import com.example.service.EVANotificationListenerService
+import com.example.service.EVAVoiceInteractionService
 import com.example.service.EvaVoiceService
 import com.example.ui.theme.*
 
@@ -38,8 +46,11 @@ data class BackgroundConfigItem(
     val description: String,
     val reason: String,
     val icon: ImageVector,
+    val activeLabel: String,
+    val inactiveLabel: String,
     val isVerified: (Context) -> Boolean,
-    val getActionIntent: (Context) -> Intent
+    val getActionIntent: (Context) -> Intent? = { null },
+    val onDirectAction: ((Context) -> Unit)? = null
 )
 
 @Composable
@@ -53,11 +64,105 @@ fun Step3BackgroundScreen(
     val configItems = remember {
         listOf(
             BackgroundConfigItem(
+                id = "notification",
+                title = "Notification Access",
+                description = "Read WhatsApp, calls & system alerts",
+                reason = "Allows EVA to announce incoming calls, WhatsApp messages, and auto-reply during driving mode.",
+                icon = Icons.Default.NotificationsActive,
+                activeLabel = "Allowed",
+                inactiveLabel = "Not Allowed",
+                isVerified = { ctx ->
+                    EVANotificationListenerService.isNotificationAccessGranted(ctx)
+                },
+                getActionIntent = { _ ->
+                    Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                }
+            ),
+            BackgroundConfigItem(
+                id = "default_assistant",
+                title = "Default Assistant",
+                description = "System-level Android digital assistant",
+                reason = "Enables holding the home button or power button to invoke EVA instead of Google Assistant.",
+                icon = Icons.Default.Assistant,
+                activeLabel = "EVA",
+                inactiveLabel = "Not Default",
+                isVerified = { ctx ->
+                    EVAVoiceInteractionService.isDefaultAssistant(ctx)
+                },
+                getActionIntent = { ctx ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        try {
+                            val rm = ctx.getSystemService(Context.ROLE_SERVICE) as? RoleManager
+                            if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) {
+                                rm.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT)
+                            } else {
+                                Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
+                            }
+                        } catch (_: Exception) {
+                            Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
+                        }
+                    } else {
+                        Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
+                    }
+                }
+            ),
+            BackgroundConfigItem(
+                id = "voice_interaction",
+                title = "VoiceInteractionService",
+                description = "Native Android voice assistant session service",
+                reason = "Enables system-level session routing and seamless launch from lockscreen or gestures.",
+                icon = Icons.Default.HeadsetMic,
+                activeLabel = "Active",
+                inactiveLabel = "Inactive",
+                isVerified = { ctx ->
+                    EVAVoiceInteractionService.isActive(ctx)
+                },
+                getActionIntent = { _ ->
+                    Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
+                }
+            ),
+            BackgroundConfigItem(
+                id = "microphone",
+                title = "Microphone",
+                description = "Record speech & ambient wake phrases",
+                reason = "Required for local wake word detection and speech recognition.",
+                icon = Icons.Default.Mic,
+                activeLabel = "Allowed",
+                inactiveLabel = "Restricted",
+                isVerified = { ctx ->
+                    ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                },
+                getActionIntent = { ctx ->
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
+                }
+            ),
+            BackgroundConfigItem(
+                id = "wake_word",
+                title = "Wake Word",
+                description = "Listen for 'Hey EVA' / 'Wake EVA'",
+                reason = "Runs battery-efficient local keyword detection on device.",
+                icon = Icons.Default.SpatialAudio,
+                activeLabel = "Enabled",
+                inactiveLabel = "Disabled",
+                isVerified = { _ ->
+                    app.preferences.isWakeWordEnabled()
+                },
+                onDirectAction = { _ ->
+                    val next = !app.preferences.isWakeWordEnabled()
+                    app.preferences.setWakeWordEnabled(next)
+                    if (next) {
+                        EvaVoiceService.startService(context)
+                    }
+                }
+            ),
+            BackgroundConfigItem(
                 id = "battery",
                 title = "Battery Optimization",
-                description = "Unrestricted background battery execution",
+                description = "Unrestricted background execution",
                 reason = "Prevents Android OS from killing EVA's background wake detection when device is in deep sleep.",
                 icon = Icons.Default.BatteryChargingFull,
+                activeLabel = "Unrestricted",
+                inactiveLabel = "Restricted",
                 isVerified = { ctx ->
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -77,9 +182,11 @@ fun Step3BackgroundScreen(
             BackgroundConfigItem(
                 id = "overlay",
                 title = "Display Over Other Apps",
-                description = "Voice Orb overlay above any application",
-                reason = "Allows EVA's Voice Orb to appear over games, videos, or web browsers when you say 'Hey EVA'.",
+                description = "EVA Edge Glow overlay above any app",
+                reason = "Allows EVA's futuristic corner glow to remain visible over apps and games.",
                 icon = Icons.Default.Layers,
+                activeLabel = "Allowed",
+                inactiveLabel = "Restricted",
                 isVerified = { ctx ->
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         Settings.canDrawOverlays(ctx)
@@ -92,32 +199,22 @@ fun Step3BackgroundScreen(
                 }
             ),
             BackgroundConfigItem(
-                id = "assistant",
-                title = "Default Digital Assistant",
-                description = "Set EVA as primary phone assistant",
-                reason = "Enables holding the home button or power button to instantly invoke EVA.",
-                icon = Icons.Default.Assistant,
+                id = "background_assistant",
+                title = "Background Assistant",
+                description = "Always-ready foreground assistant service",
+                reason = "Keeps EVA running reliably in the background with persistent status notification.",
+                icon = Icons.Default.Bolt,
+                activeLabel = "Active",
+                inactiveLabel = "Inactive",
                 isVerified = { ctx ->
-                    val assist = Settings.Secure.getString(ctx.contentResolver, "voice_interaction_service")
-                        ?: Settings.Secure.getString(ctx.contentResolver, "assistant")
-                    assist?.contains(ctx.packageName) == true
+                    EvaVoiceService.isRunning(ctx)
                 },
-                getActionIntent = { _ ->
-                    Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
-                }
-            ),
-            BackgroundConfigItem(
-                id = "notification",
-                title = "Notification Access",
-                description = "Read WhatsApp & system alerts",
-                reason = "Allows EVA to announce incoming calls, WhatsApp messages, and auto-reply during driving mode.",
-                icon = Icons.Default.NotificationsActive,
-                isVerified = { ctx ->
-                    val flat = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners")
-                    flat?.contains(ctx.packageName) == true
-                },
-                getActionIntent = { _ ->
-                    Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                onDirectAction = { ctx ->
+                    if (EvaVoiceService.isRunning(ctx)) {
+                        EvaVoiceService.stopService(ctx)
+                    } else {
+                        EvaVoiceService.startService(ctx)
+                    }
                 }
             ),
             BackgroundConfigItem(
@@ -126,6 +223,8 @@ fun Step3BackgroundScreen(
                 description = "Automate device workflows & actions",
                 reason = "Empowers EVA to perform automation commands, open apps, and navigate on your behalf.",
                 icon = Icons.Default.AccessibilityNew,
+                activeLabel = "Active",
+                inactiveLabel = "Not Enabled",
                 isVerified = { ctx ->
                     EVAAccessibilityService.isEnabledInSystem(ctx)
                 },
@@ -140,12 +239,22 @@ fun Step3BackgroundScreen(
         mutableStateOf(configItems.associate { it.id to it.isVerified(context) })
     }
 
+    fun refreshAllStates() {
+        verifiedStates = configItems.associate { it.id to it.isVerified(context) }
+    }
+
+    val micLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        refreshAllStates()
+    }
+
     // Refresh permissions automatically when returning from Settings via Lifecycle
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                verifiedStates = configItems.associate { it.id to it.isVerified(context) }
+                refreshAllStates()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -175,7 +284,7 @@ fun Step3BackgroundScreen(
             modifier = Modifier.padding(bottom = 8.dp)
         ) {
             Text(
-                text = "Step 3 of 3 • Background & Assistant",
+                text = "Step 3 of 3 • Real System Services",
                 color = ElectricViolet,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -184,7 +293,7 @@ fun Step3BackgroundScreen(
         }
 
         Text(
-            text = "Background Assistant Setup",
+            text = "Background & Assistant Setup",
             color = TextPrimary,
             fontSize = 26.sp,
             fontWeight = FontWeight.Bold
@@ -193,14 +302,14 @@ fun Step3BackgroundScreen(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = "Configure system capabilities so EVA can wake up with 'Hey EVA', announce alerts, and assist you anywhere.",
+            text = "Configure native Android permissions so EVA can run in the background, detect 'Hey EVA', and display Edge Glow above all apps.",
             color = TextSecondary,
             fontSize = 14.sp
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Prominent Verified Banner (matches Step 2 verification styling)
+        // Prominent Verified Banner
         if (hasAnyVerified) {
             Surface(
                 shape = RoundedCornerShape(12.dp),
@@ -224,16 +333,16 @@ fun Step3BackgroundScreen(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "Permission Verified",
+                            text = "System Status Verified",
                             color = StatusSuccess,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = if (verifiedCount == totalCount) {
-                                "All background capabilities verified and active!"
+                                "All 9 native system capabilities active and operational!"
                             } else {
-                                "$verifiedCount of $totalCount background permissions verified and active."
+                                "$verifiedCount of $totalCount native Android capabilities active."
                             },
                             color = TextSecondary,
                             fontSize = 12.sp
@@ -246,16 +355,17 @@ fun Step3BackgroundScreen(
         // Configuration items list
         configItems.forEach { item ->
             val isVerified = verifiedStates[item.id] == true
+            val currentStatusLabel = if (isVerified) item.activeLabel else item.inactiveLabel
 
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = if (isVerified) DarkSurface.copy(alpha = 0.95f) else DarkSurface
                 ),
-                border = if (isVerified) BorderStroke(1.dp, StatusSuccess.copy(alpha = 0.45f)) else null,
+                border = if (isVerified) BorderStroke(1.dp, StatusSuccess.copy(alpha = 0.45f)) else BorderStroke(1.dp, DarkOutline.copy(alpha = 0.4f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 5.dp)
+                    .padding(vertical = 4.dp)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -277,29 +387,16 @@ fun Step3BackgroundScreen(
                         Spacer(modifier = Modifier.width(12.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
+                            // Status line: e.g. "✓ Notification Access — Allowed" or "⚠ Notification Access — Not Allowed"
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = item.title,
-                                    color = TextPrimary,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    text = if (isVerified) "✓ ${item.title} — $currentStatusLabel" else "⚠ ${item.title} — $currentStatusLabel",
+                                    color = if (isVerified) StatusSuccess else StatusWarning,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
-                                if (isVerified) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = StatusSuccess.copy(alpha = 0.2f)
-                                    ) {
-                                        Text(
-                                            text = "Verified",
-                                            color = StatusSuccess,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
                             }
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = item.description,
                                 color = TextSecondary,
@@ -312,10 +409,18 @@ fun Step3BackgroundScreen(
                         if (isVerified) {
                             FilledTonalButton(
                                 onClick = {
-                                    try {
-                                        context.startActivity(item.getActionIntent(context))
-                                    } catch (_: Exception) {
-                                        context.startActivity(Intent(Settings.ACTION_SETTINGS))
+                                    if (item.onDirectAction != null) {
+                                        item.onDirectAction.invoke(context)
+                                        refreshAllStates()
+                                    } else {
+                                        val intent = item.getActionIntent(context)
+                                        if (intent != null) {
+                                            try {
+                                                context.startActivity(intent)
+                                            } catch (_: Exception) {
+                                                context.startActivity(Intent(Settings.ACTION_SETTINGS))
+                                            }
+                                        }
                                     }
                                 },
                                 colors = ButtonDefaults.filledTonalButtonColors(
@@ -326,15 +431,25 @@ fun Step3BackgroundScreen(
                             ) {
                                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Verified", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(item.activeLabel, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         } else {
                             FilledTonalButton(
                                 onClick = {
-                                    try {
-                                        context.startActivity(item.getActionIntent(context))
-                                    } catch (_: Exception) {
-                                        context.startActivity(Intent(Settings.ACTION_SETTINGS))
+                                    if (item.id == "microphone") {
+                                        micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    } else if (item.onDirectAction != null) {
+                                        item.onDirectAction.invoke(context)
+                                        refreshAllStates()
+                                    } else {
+                                        val intent = item.getActionIntent(context)
+                                        if (intent != null) {
+                                            try {
+                                                context.startActivity(intent)
+                                            } catch (_: Exception) {
+                                                context.startActivity(Intent(Settings.ACTION_SETTINGS))
+                                            }
+                                        }
                                     }
                                 },
                                 colors = ButtonDefaults.filledTonalButtonColors(
@@ -356,7 +471,7 @@ fun Step3BackgroundScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "Why needed: ${item.reason}",
+                            text = "Purpose: ${item.reason}",
                             color = TextMuted,
                             fontSize = 11.sp,
                             lineHeight = 15.sp,
@@ -387,7 +502,7 @@ fun Step3BackgroundScreen(
         ) {
             Icon(Icons.Default.RocketLaunch, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Start EVA", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Text("Launch EVA Assistant", fontSize = 17.sp, fontWeight = FontWeight.Bold)
         }
 
         Spacer(modifier = Modifier.height(24.dp))

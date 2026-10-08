@@ -242,4 +242,68 @@ class EvaPreferences(context: Context) {
     fun setHighContrast(highContrast: Boolean) {
         prefs.edit().putBoolean("high_contrast", highContrast).apply()
     }
+
+    // --- EDGE GLOW OVERLAY PREFERENCES ---
+    fun isEdgeGlowEnabled(): Boolean =
+        prefs.getBoolean("edge_glow_enabled", true)
+
+    fun setEdgeGlowEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("edge_glow_enabled", enabled).apply()
+    }
+
+    fun isShowEdgeGlowWhenClosed(): Boolean =
+        prefs.getBoolean("edge_glow_when_closed", true)
+
+    fun setShowEdgeGlowWhenClosed(show: Boolean) {
+        prefs.edit().putBoolean("edge_glow_when_closed", show).apply()
+    }
+
+    fun isWakeAnimationEnabled(): Boolean =
+        prefs.getBoolean("edge_glow_wake_anim", true)
+
+    fun setWakeAnimationEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("edge_glow_wake_anim", enabled).apply()
+    }
+
+    fun isListeningAnimationEnabled(): Boolean =
+        prefs.getBoolean("edge_glow_listening_anim", true)
+
+    fun setListeningAnimationEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("edge_glow_listening_anim", enabled).apply()
+    }
+
+    fun isThinkingAnimationEnabled(): Boolean =
+        prefs.getBoolean("edge_glow_thinking_anim", true)
+
+    fun setThinkingAnimationEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("edge_glow_thinking_anim", enabled).apply()
+    }
+
+    fun isSpeakingAnimationEnabled(): Boolean =
+        prefs.getBoolean("edge_glow_speaking_anim", true)
+
+    fun setSpeakingAnimationEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("edge_glow_speaking_anim", enabled).apply()
+    }
+
+    fun isIdleAnimationEnabled(): Boolean =
+        prefs.getBoolean("edge_glow_idle_anim", true)
+
+    fun setIdleAnimationEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("edge_glow_idle_anim", enabled).apply()
+    }
+
+    fun getEdgeGlowIntensity(): Float =
+        prefs.getFloat("edge_glow_intensity", 1.0f)
+
+    fun setEdgeGlowIntensity(intensity: Float) {
+        prefs.edit().putFloat("edge_glow_intensity", intensity.coerceIn(0.2f, 1.5f)).apply()
+    }
+
+    fun isEdgeGlowBatterySaver(): Boolean =
+        prefs.getBoolean("edge_glow_battery_saver", false)
+
+    fun setEdgeGlowBatterySaver(enabled: Boolean) {
+        prefs.edit().putBoolean("edge_glow_battery_saver", enabled).apply()
+    }
 }

@@ -1,6 +1,8 @@
 package com.example.ai
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import com.example.data.local.EvaDatabase
 import com.example.data.local.entities.MemoryEntity
 import com.example.data.local.entities.ReminderEntity
@@ -231,34 +233,94 @@ class AIProviderManager(
             }
             "phone_call" -> {
                 val target = args.optString("contact_or_number", "Contact")
+                val dialAction: () -> Unit = {
+                    try {
+                        val cleanDigits = target.filter { it.isDigit() || it == '+' }
+                        val uri = if (cleanDigits.isNotEmpty()) Uri.parse("tel:$cleanDigits") else Uri.parse("tel:")
+                        val dialIntent = Intent(Intent.ACTION_DIAL, uri).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(dialIntent)
+                    } catch (_: Exception) {}
+                }
+                dialAction()
                 ToolExecutionResult(
                     toolName = "Phone Call",
                     success = true,
-                    output = "Ready to dial $target.",
-                    requiresConfirmation = true,
-                    pendingActionDescription = "Call $target on phone?"
+                    output = "Opening dialer for $target.",
+                    requiresConfirmation = false,
+                    onConfirmAction = dialAction
                 )
             }
             "whatsapp_send" -> {
                 val recipient = args.optString("recipient", "Contact")
                 val msg = args.optString("message", "")
+                val whatsappAction: () -> Unit = {
+                    try {
+                        val cleanPhone = recipient.filter { it.isDigit() }
+                        val url = if (cleanPhone.length >= 7) {
+                            "https://api.whatsapp.com/send?phone=$cleanPhone&text=${Uri.encode(msg)}"
+                        } else {
+                            "https://api.whatsapp.com/send?text=${Uri.encode(msg)}"
+                        }
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                    } catch (_: Exception) {
+                        deviceControlManager.openApp("whatsapp")
+                    }
+                }
+                whatsappAction()
                 ToolExecutionResult(
                     toolName = "WhatsApp",
                     success = true,
-                    output = "Ready to send WhatsApp message to $recipient.",
-                    requiresConfirmation = true,
-                    pendingActionDescription = "Send WhatsApp message: \"$msg\" to $recipient?"
+                    output = "Opening WhatsApp to send: \"$msg\".",
+                    requiresConfirmation = false,
+                    onConfirmAction = whatsappAction
+                )
+            }
+            "sms_send" -> {
+                val recipient = args.optString("recipient", "")
+                val msg = args.optString("message", "")
+                val smsAction: () -> Unit = {
+                    try {
+                        val cleanPhone = recipient.filter { it.isDigit() || it == '+' }
+                        val smsIntent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$cleanPhone")).apply {
+                            putExtra("sms_body", msg)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(smsIntent)
+                    } catch (_: Exception) {}
+                }
+                smsAction()
+                ToolExecutionResult(
+                    toolName = "SMS",
+                    success = true,
+                    output = "Opening SMS messenger with: \"$msg\".",
+                    requiresConfirmation = false,
+                    onConfirmAction = smsAction
                 )
             }
             "email_send" -> {
                 val to = args.optString("recipient", "")
                 val subj = args.optString("subject", "")
+                val emailAction: () -> Unit = {
+                    try {
+                        val emailIntent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$to")).apply {
+                            putExtra(Intent.EXTRA_SUBJECT, subj)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(emailIntent)
+                    } catch (_: Exception) {}
+                }
+                emailAction()
                 ToolExecutionResult(
                     toolName = "Email",
                     success = true,
-                    output = "Drafted email to $to.",
-                    requiresConfirmation = true,
-                    pendingActionDescription = "Send email to $to with subject \"$subj\"?"
+                    output = "Opening Email draft to $to.",
+                    requiresConfirmation = false,
+                    onConfirmAction = emailAction
                 )
             }
             "weather_lookup" -> {

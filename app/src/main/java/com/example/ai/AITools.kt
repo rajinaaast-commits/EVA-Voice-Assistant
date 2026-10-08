@@ -103,6 +103,12 @@ object AIToolRegistry {
             parametersJson = """{"recipient": "contact name or phone", "message": "message body"}"""
         ),
         AIToolDefinition(
+            name = "sms_send",
+            description = "Send an SMS text message to a phone number or contact.",
+            isSensitive = true,
+            parametersJson = """{"recipient": "phone number", "message": "sms body"}"""
+        ),
+        AIToolDefinition(
             name = "email_send",
             description = "Draft or send an email to a recipient.",
             isSensitive = true,
