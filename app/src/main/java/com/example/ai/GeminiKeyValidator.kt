@@ -40,27 +40,47 @@ class GeminiKeyValidator(
     private val geminiProvider: GeminiProvider
 ) {
 
+    /**
+     * Trims ONLY accidental surrounding (leading/trailing) whitespace from pasted keys.
+     * Never modifies or replaces any characters inside the actual key.
+     */
     fun sanitizeKey(rawKey: String): String {
         return rawKey.trim()
-            .trim('"', '\'')
-            .replace("\n", "")
-            .replace("\r", "")
-            .trim()
     }
 
+    /**
+     * Checks if the key has basic syntax readiness.
+     * Does NOT hardcode key format or reject valid characters such as '_', '-', or '.'.
+     */
     fun validateSyntax(rawKey: String): SyntaxValidation {
-        val clean = sanitizeKey(rawKey)
-        if (clean.isBlank()) {
+        if (rawKey.isBlank()) {
             return SyntaxValidation.Missing("Gemini API key is missing. Please provide a key from Google AI Studio.")
         }
 
-        if (clean.contains(" ")) {
+        // Check for accidental surrounding whitespace
+        val hasLeadingOrTrailingWhitespace = rawKey.startsWith(" ") || rawKey.endsWith(" ") ||
+                rawKey.startsWith("\n") || rawKey.endsWith("\n") ||
+                rawKey.startsWith("\r") || rawKey.endsWith("\r") ||
+                rawKey.startsWith("\t") || rawKey.endsWith("\t")
+
+        if (hasLeadingOrTrailingWhitespace) {
             return SyntaxValidation.Malformed(
-                reason = "API key contains spaces.",
-                tip = "Ensure no spaces were copied at the beginning, end, or inside the key."
+                reason = "Whitespace detected around key.",
+                tip = "Accidental leading or trailing whitespace was detected. Tap 'Clean & Test Key' to trim it and authenticate."
             )
         }
 
+        val clean = rawKey.trim()
+
+        // Check for internal whitespace (spaces or line breaks inside the key)
+        if (clean.contains(" ") || clean.contains("\n") || clean.contains("\r") || clean.contains("\t")) {
+            return SyntaxValidation.Malformed(
+                reason = "API key contains spaces or line breaks.",
+                tip = "Ensure no spaces or line breaks exist inside the key."
+            )
+        }
+
+        // Check for template placeholder values
         val placeholders = listOf(
             "YOUR_API_KEY",
             "YOUR_GEMINI_KEY",
@@ -78,22 +98,7 @@ class GeminiKeyValidator(
             )
         }
 
-        if (clean.length < 20) {
-            return SyntaxValidation.Malformed(
-                reason = "Key length (${clean.length} characters) is too short.",
-                tip = "Google Gemini API keys are typically ~39 characters long (e.g. AIzaSy...)."
-            )
-        }
-
-        // Check for disallowed characters in API keys
-        val allowedPattern = Regex("^[A-Za-z0-9_\\-]+$")
-        if (!allowedPattern.matches(clean)) {
-            return SyntaxValidation.Malformed(
-                reason = "Key contains invalid characters or special symbols.",
-                tip = "Standard Gemini API keys contain only letters, numbers, underscores, and hyphens."
-            )
-        }
-
+        // Key is acceptable for server testing without restrictive regex or assumptions
         return SyntaxValidation.Valid(clean)
     }
 
@@ -103,14 +108,15 @@ class GeminiKeyValidator(
         maxRetries: Int = 2,
         onProgress: ((KeyValidationState.Validating) -> Unit)? = null
     ): KeyValidationState {
-        val syntax = validateSyntax(rawKey)
+        // Clean accidental surrounding whitespace before server test
+        val cleanKey = sanitizeKey(rawKey)
+        val syntax = validateSyntax(cleanKey)
         when (syntax) {
             is SyntaxValidation.Missing -> return KeyValidationState.Missing
             is SyntaxValidation.Malformed -> return KeyValidationState.Malformed(syntax.reason, syntax.tip)
-            is SyntaxValidation.Valid -> { /* proceed */ }
+            is SyntaxValidation.Valid -> { /* proceed with cleanKey */ }
         }
 
-        val cleanKey = (syntax as SyntaxValidation.Valid).cleanedKey
         var lastStatus: ConnectionStatus? = null
 
         for (attempt in 1..maxRetries) {
@@ -123,19 +129,29 @@ class GeminiKeyValidator(
             when (status) {
                 is ConnectionStatus.Connected -> {
                     return KeyValidationState.Success(
-                        message = "Key verified successfully! Connected to Google Gemini 2.5 Flash.",
+                        message = "Key verified successfully! Connected to Google Gemini.",
                         latencyMs = elapsed
                     )
                 }
 
                 is ConnectionStatus.InvalidKey -> {
-                    // Fatal key rejection by Google API: no point retrying without modifying key
+                    // Fatal authentication error: invalid or revoked key
                     return KeyValidationState.Failed(
-                        reason = "Authentication Rejected (Invalid Key)",
-                        userFriendlyMessage = "Google AI Studio rejected this API key. The key was not recognized or has been disabled.",
+                        reason = "Authentication Error",
+                        userFriendlyMessage = "Gemini API key is invalid or revoked.",
                         canRetry = true,
                         attempt = attempt,
-                        suggestedAction = "Verify your API key at aistudio.google.com and check that no IP/referrer restrictions block Android requests."
+                        suggestedAction = "Verify your API key at aistudio.google.com and generate a new key if this one was revoked or expired."
+                    )
+                }
+
+                is ConnectionStatus.PermissionDenied -> {
+                    return KeyValidationState.Failed(
+                        reason = "API Permission Error",
+                        userFriendlyMessage = "Permission denied: ${status.message.ifBlank { "The API key does not have permission to access the Gemini API." }}",
+                        canRetry = true,
+                        attempt = attempt,
+                        suggestedAction = "In Google Cloud Console, check that the Generative Language API is enabled and that no Android package or IP restrictions block requests."
                     )
                 }
 
@@ -145,8 +161,24 @@ class GeminiKeyValidator(
                         userFriendlyMessage = "The quota limit for this Gemini API key has been exceeded or rate limited.",
                         canRetry = true,
                         attempt = attempt,
-                        suggestedAction = "Check your billing and rate limits in Google AI Studio or Cloud Console."
+                        suggestedAction = "Check your billing and rate limits in Google AI Studio or Google Cloud Console."
                     )
+                }
+
+                is ConnectionStatus.UnsupportedModel -> {
+                    return KeyValidationState.Failed(
+                        reason = "Unsupported Model",
+                        userFriendlyMessage = "The specified model is not supported or was not found: ${status.message}",
+                        canRetry = true,
+                        attempt = attempt,
+                        suggestedAction = "Select a recommended model such as gemini-2.5-flash or gemini-2.0-flash."
+                    )
+                }
+
+                is ConnectionStatus.NetworkError -> {
+                    if (attempt < maxRetries) {
+                        delay(1000L * attempt)
+                    }
                 }
 
                 is ConnectionStatus.NotConfigured -> {
@@ -154,25 +186,67 @@ class GeminiKeyValidator(
                 }
 
                 is ConnectionStatus.Error -> {
-                    // Possible transient network glitch: wait and retry if attempts remain
                     if (attempt < maxRetries) {
-                        delay(1200L * attempt)
+                        delay(1000L * attempt)
                     }
                 }
 
-                is ConnectionStatus.Testing -> {
-                    // transient
-                }
+                is ConnectionStatus.Testing -> {}
             }
         }
 
-        val detail = (lastStatus as? ConnectionStatus.Error)?.message ?: "Unable to contact Google Gemini servers."
-        return KeyValidationState.Failed(
-            reason = "Connection & Authentication Failed",
-            userFriendlyMessage = "Could not verify your API key with Google servers: $detail",
-            canRetry = true,
-            attempt = maxRetries,
-            suggestedAction = "Check your device's Wi-Fi or cellular internet connection and tap 'Retry' below."
-        )
+        // Exhausted retries: map to the appropriate specific failure
+        return when (val finalStatus = lastStatus) {
+            is ConnectionStatus.InvalidKey -> KeyValidationState.Failed(
+                reason = "Authentication Error",
+                userFriendlyMessage = "Gemini API key is invalid or revoked.",
+                canRetry = true,
+                attempt = maxRetries,
+                suggestedAction = "Verify your API key at aistudio.google.com."
+            )
+
+            is ConnectionStatus.PermissionDenied -> KeyValidationState.Failed(
+                reason = "API Permission Error",
+                userFriendlyMessage = "Permission denied: ${finalStatus.message}",
+                canRetry = true,
+                attempt = maxRetries,
+                suggestedAction = "Check key restrictions in Google Cloud Console."
+            )
+
+            is ConnectionStatus.QuotaExceeded -> KeyValidationState.Failed(
+                reason = "Quota Limit Exceeded",
+                userFriendlyMessage = "Quota or rate limit exceeded for this Gemini API key.",
+                canRetry = true,
+                attempt = maxRetries,
+                suggestedAction = "Check your billing and quotas in Google AI Studio."
+            )
+
+            is ConnectionStatus.UnsupportedModel -> KeyValidationState.Failed(
+                reason = "Unsupported Model",
+                userFriendlyMessage = "Model error: ${finalStatus.message}",
+                canRetry = true,
+                attempt = maxRetries,
+                suggestedAction = "Switch to a recommended model (e.g. gemini-2.5-flash)."
+            )
+
+            is ConnectionStatus.NetworkError -> KeyValidationState.Failed(
+                reason = "Network Connection Error",
+                userFriendlyMessage = "Unable to connect to Google Gemini servers: ${finalStatus.message}",
+                canRetry = true,
+                attempt = maxRetries,
+                suggestedAction = "Check your device's Wi-Fi or cellular internet connection and tap 'Retry Authentication'."
+            )
+
+            else -> {
+                val detail = (finalStatus as? ConnectionStatus.Error)?.message ?: "Unable to contact Google Gemini servers."
+                KeyValidationState.Failed(
+                    reason = "Connection Failed",
+                    userFriendlyMessage = detail,
+                    canRetry = true,
+                    attempt = maxRetries,
+                    suggestedAction = "Check your internet connection and tap 'Retry Authentication'."
+                )
+            }
+        }
     }
 }

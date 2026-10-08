@@ -6,6 +6,9 @@ sealed class ConnectionStatus {
     object Connected : ConnectionStatus()
     object InvalidKey : ConnectionStatus()
     object QuotaExceeded : ConnectionStatus()
+    data class PermissionDenied(val message: String) : ConnectionStatus()
+    data class UnsupportedModel(val message: String) : ConnectionStatus()
+    data class NetworkError(val message: String) : ConnectionStatus()
     data class Error(val message: String) : ConnectionStatus()
 }
 

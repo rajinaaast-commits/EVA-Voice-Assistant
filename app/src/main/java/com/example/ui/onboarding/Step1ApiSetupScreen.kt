@@ -494,8 +494,11 @@ fun ConnectionStatusBadge(status: ConnectionStatus) {
         ConnectionStatus.NotConfigured -> Triple("Not configured", TextMuted, Icons.Default.LinkOff)
         ConnectionStatus.Testing -> Triple("Testing...", StatusWarning, Icons.Default.Sync)
         ConnectionStatus.Connected -> Triple("Connected", StatusSuccess, Icons.Default.CheckCircle)
-        ConnectionStatus.InvalidKey -> Triple("Invalid key", StatusError, Icons.Default.HighlightOff)
+        ConnectionStatus.InvalidKey -> Triple("Invalid/revoked key", StatusError, Icons.Default.HighlightOff)
         ConnectionStatus.QuotaExceeded -> Triple("Quota exceeded", StatusWarning, Icons.Default.HourglassBottom)
+        is ConnectionStatus.PermissionDenied -> Triple("Permission denied", StatusError, Icons.Default.Lock)
+        is ConnectionStatus.UnsupportedModel -> Triple("Unsupported model", StatusWarning, Icons.Default.Warning)
+        is ConnectionStatus.NetworkError -> Triple("Network error", StatusError, Icons.Default.ErrorOutline)
         is ConnectionStatus.Error -> Triple("Error: ${status.message.take(28)}", StatusError, Icons.Default.ErrorOutline)
     }
 

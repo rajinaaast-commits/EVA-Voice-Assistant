@@ -28,7 +28,7 @@ class GeminiProvider : AIProvider {
     }
 
     private fun cleanApiKey(rawKey: String): String {
-        return rawKey.trim().trim('"', '\'').trim()
+        return rawKey.trim()
     }
 
     private fun resolveUrl(customBaseUrl: String?): String {
@@ -45,6 +45,37 @@ class GeminiProvider : AIProvider {
             trimmed.isBlank() || trimmed.equals("auto", ignoreCase = true) -> PRIMARY_DEFAULT_MODEL
             trimmed == "gemini-3.5-flash" || trimmed == "gemini-3.1-pro-preview" -> PRIMARY_DEFAULT_MODEL
             else -> trimmed
+        }
+    }
+
+    private fun mapHttpErrorToStatus(code: Int, errMessage: String, responseMessage: String): ConnectionStatus {
+        val lower = errMessage.lowercase()
+        return when {
+            // Authentication / Revocation error
+            code == 400 && (lower.contains("api key not valid") || lower.contains("api_key_invalid") || lower.contains("key not valid") || lower.contains("invalid api key")) ->
+                ConnectionStatus.InvalidKey
+            code == 401 ->
+                ConnectionStatus.InvalidKey
+            code == 403 && (lower.contains("api key expired") || lower.contains("api key not valid") || lower.contains("api_key_invalid") || lower.contains("key expired") || lower.contains("revoked")) ->
+                ConnectionStatus.InvalidKey
+
+            // API Permission error / restriction
+            code == 403 ->
+                ConnectionStatus.PermissionDenied(if (errMessage.isNotBlank()) errMessage else "API permission denied or restricted in Google Cloud Console.")
+
+            // Quota / Rate limit error
+            code == 429 || lower.contains("quota") || lower.contains("resource_exhausted") ->
+                ConnectionStatus.QuotaExceeded
+
+            // Unsupported model / Not found
+            code == 404 ->
+                ConnectionStatus.UnsupportedModel(if (errMessage.isNotBlank()) errMessage else "Model or endpoint not found (HTTP 404)")
+
+            errMessage.isNotBlank() ->
+                ConnectionStatus.Error(errMessage.take(120))
+
+            else ->
+                ConnectionStatus.Error("HTTP $code: $responseMessage")
         }
     }
 
@@ -71,6 +102,7 @@ class GeminiProvider : AIProvider {
 
                     val code = response.code
                     val body = response.body?.string() ?: ""
+                    val errMessage = parseErrorMessage(body)
 
                     // If models listing failed due to key restrictions or permission scopes,
                     // test a lightweight direct 1-token prompt on gemini-2.0-flash before giving up
@@ -78,30 +110,25 @@ class GeminiProvider : AIProvider {
                         val pingResult = testDirectPing(cleanKey, effectiveBaseUrl, FALLBACK_MODEL_FAST)
                         if (pingResult is ConnectionStatus.Connected) {
                             return@withContext ConnectionStatus.Connected
+                        } else if (pingResult is ConnectionStatus.InvalidKey || pingResult is ConnectionStatus.QuotaExceeded || pingResult is ConnectionStatus.PermissionDenied) {
+                            return@withContext pingResult
                         }
                     }
 
-                    val errMessage = parseErrorMessage(body)
-                    return@withContext when {
-                        code == 400 && (errMessage.contains("API key not valid", ignoreCase = true) || errMessage.contains("API_KEY_INVALID", ignoreCase = true)) ->
-                            ConnectionStatus.InvalidKey
-                        code == 401 || code == 403 ->
-                            ConnectionStatus.InvalidKey
-                        code == 429 || errMessage.contains("quota", ignoreCase = true) ->
-                            ConnectionStatus.QuotaExceeded
-                        errMessage.isNotBlank() ->
-                            ConnectionStatus.Error(errMessage.take(80))
-                        else ->
-                            ConnectionStatus.Error("HTTP $code: ${response.message}")
-                    }
+                    return@withContext mapHttpErrorToStatus(code, errMessage, response.message)
                 }
             } catch (e: Exception) {
                 // If list models had a network glitch, try fallback ping once
-                val pingResult = testDirectPing(cleanKey, effectiveBaseUrl, FALLBACK_MODEL_FAST)
-                if (pingResult is ConnectionStatus.Connected) {
-                    return@withContext ConnectionStatus.Connected
-                }
-                ConnectionStatus.Error(e.localizedMessage ?: "Network connection failed")
+                try {
+                    val pingResult = testDirectPing(cleanKey, effectiveBaseUrl, FALLBACK_MODEL_FAST)
+                    if (pingResult is ConnectionStatus.Connected) {
+                        return@withContext ConnectionStatus.Connected
+                    } else if (pingResult is ConnectionStatus.InvalidKey || pingResult is ConnectionStatus.QuotaExceeded || pingResult is ConnectionStatus.PermissionDenied) {
+                        return@withContext pingResult
+                    }
+                } catch (_: Exception) {}
+
+                ConnectionStatus.NetworkError(e.localizedMessage ?: "Network connection failed")
             }
         }
 
@@ -131,19 +158,10 @@ class GeminiProvider : AIProvider {
                 val code = response.code
                 val body = response.body?.string() ?: ""
                 val errMessage = parseErrorMessage(body)
-                return when {
-                    code == 400 && (errMessage.contains("API key not valid", ignoreCase = true) || errMessage.contains("API_KEY_INVALID", ignoreCase = true)) ->
-                        ConnectionStatus.InvalidKey
-                    code == 401 || code == 403 ->
-                        ConnectionStatus.InvalidKey
-                    code == 429 ->
-                        ConnectionStatus.QuotaExceeded
-                    else ->
-                        ConnectionStatus.Error(if (errMessage.isNotBlank()) errMessage.take(80) else "HTTP $code")
-                }
+                return mapHttpErrorToStatus(code, errMessage, response.message)
             }
-        } catch (_: Exception) {
-            return ConnectionStatus.Error("Connection timed out")
+        } catch (e: Exception) {
+            return ConnectionStatus.NetworkError(e.localizedMessage ?: "Connection timed out")
         }
     }
 
@@ -249,12 +267,14 @@ class GeminiProvider : AIProvider {
                     val code = response.code
                     val parsedMsg = parseErrorMessage(errorBody)
                     val errMsg = when {
-                        code == 400 && parsedMsg.contains("API key not valid", ignoreCase = true) ->
-                            "Invalid Gemini API Key. Please verify your key at Google AI Studio."
-                        code == 401 || code == 403 ->
-                            "Unauthorized Gemini API Key. Check project access or restrictions."
+                        code == 400 && (parsedMsg.contains("API key not valid", ignoreCase = true) || parsedMsg.contains("API_KEY_INVALID", ignoreCase = true)) ->
+                            "Gemini API key is invalid or revoked."
+                        code == 401 || (code == 403 && (parsedMsg.contains("api key", ignoreCase = true) || parsedMsg.contains("revoked", ignoreCase = true) || parsedMsg.contains("expired", ignoreCase = true))) ->
+                            "Gemini API key is invalid or revoked."
+                        code == 403 ->
+                            "Permission denied: ${parsedMsg.ifBlank { "Check API key restrictions in Google Cloud Console." }}"
                         code == 404 ->
-                            "Model '$targetModel' not found (HTTP 404). Falling back to standard model."
+                            "Model '$targetModel' not found (HTTP 404)."
                         code == 429 ->
                             "Gemini API Quota exceeded. Please try again later or check your Google Cloud quota."
                         parsedMsg.isNotBlank() ->

@@ -216,7 +216,7 @@ fun ApiKeysSettingsView() {
 
     // Function to run server-backed validation and retry
     fun triggerGeminiValidation(isRetry: Boolean = false) {
-        val cleanKey = geminiKey.trim().trim('"', '\'')
+        val cleanKey = app.aiProviderManager.geminiKeyValidator.sanitizeKey(geminiKey)
         geminiKey = cleanKey
 
         if (cleanKey.isBlank()) {
@@ -466,7 +466,7 @@ fun ApiKeysSettingsView() {
                                         onClick = {
                                             val clipboardText = clipboardManager?.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
                                             if (clipboardText.isNotBlank()) {
-                                                geminiKey = clipboardText.trim().trim('"', '\'')
+                                                geminiKey = app.aiProviderManager.geminiKeyValidator.sanitizeKey(clipboardText)
                                                 triggerGeminiValidation(isRetry = false)
                                             } else {
                                                 Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
@@ -888,7 +888,7 @@ fun ApiKeysSettingsView() {
         Button(
             onClick = {
                 val cleanGemini = app.aiProviderManager.geminiKeyValidator.sanitizeKey(geminiKey)
-                val cleanOmni = omniKey.trim().trim('"', '\'')
+                val cleanOmni = omniKey.trim()
                 geminiKey = cleanGemini
                 omniKey = cleanOmni
 
